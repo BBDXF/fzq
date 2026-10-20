@@ -19,6 +19,9 @@ Handles homophones, polyphonic characters (长沙 = changsha / cs), typos, pinyi
 go build -o fzq ./src
 ```
 
+或从 [Releases](https://github.com/BBDXF/fzq/releases) 下载预编译版本（Linux / Windows / macOS，x86_64 / ARM）。推送 `v*` 标签会自动发布新版本。
+Or download prebuilt binaries from [Releases](https://github.com/BBDXF/fzq/releases) (Linux / Windows / macOS, x86_64 / ARM). Pushing a `v*` tag publishes a new release.
+
 ## 参数 / Options
 
 ```

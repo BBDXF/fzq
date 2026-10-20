@@ -11,6 +11,10 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// version 在发布时由 -ldflags "-X main.version=v1.2.3" 注入
+// version is injected at release time via -ldflags "-X main.version=v1.2.3".
+var version = "dev"
+
 const usage = `fzq - fuzzy matcher for spoken / voice-style queries
       (Chinese homophones, pinyin, fuzzy pinyin, typos, partial input)
 
@@ -78,7 +82,7 @@ func run(args []string) int {
 	var keys, strip listFlag
 	var cfgFile string
 	fs := flag.NewFlagSet("fzq", flag.ContinueOnError)
-	fs.Usage = func() { fmt.Fprint(os.Stderr, usage) }
+	fs.Usage = func() { fmt.Fprintf(os.Stderr, "fzq %s\n%s", version, usage) }
 	str := func(p *string, names ...string) {
 		for _, n := range names {
 			fs.StringVar(p, n, "", "")
