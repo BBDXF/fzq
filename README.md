@@ -10,8 +10,8 @@ fzq -k name zsf examples/contacts.yaml  # 首字母 / initials  → 张三丰
 ls src | fzq engin                      # 文本行 / text lines → engine.go
 ```
 
-能处理：同音字、错字、拼音、首字母、方言模糊音（平翘舌、前后鼻音、n/l、f/h）、只说一部分、英文拼错、数字读法（十七 ⇄ 17）、两个字段任意顺序组合。
-Handles homophones, typos, pinyin, initials, fuzzy pinyin, partial input, English typos, number forms (十七 ⇄ 17), and queries combining two fields in any order.
+能处理：同音字、多音字（长沙 = changsha / cs）、错字、拼音、首字母、方言模糊音（平翘舌、前后鼻音、n/l、f/h）、只说一部分或省略中间的词（华为手表 → 华为智能手表）、英文拼错、数字读法（十七 ⇄ 17）、两个字段任意顺序组合。
+Handles homophones, polyphonic characters (长沙 = changsha / cs), typos, pinyin, initials, fuzzy pinyin, partial input or skipped words (华为手表 → 华为智能手表), English typos, number forms (十七 ⇄ 17), and queries combining two fields in any order.
 
 ## 编译 / Build
 
@@ -63,6 +63,12 @@ $ fzq 胡和浩特 examples/cities.txt
 呼和浩特
 $ fzq wlmq examples/cities.txt
 乌鲁木齐
+$ fzq cs examples/cities.txt          # 多音字 / polyphone: 长 = chang
+长沙
+
+# 省略中间的词 / skipped words
+$ fzq -r '.data.items[]' -k name 罗级鼠标 examples/products.json
+{"id":4,"name":"罗技无线鼠标 MX Master 3S","price":699}
 
 # YAML：拼音输入，文本输出 / YAML: pinyin input, text output
 $ fzq -k name -o text lisisi examples/contacts.yaml

@@ -12,12 +12,18 @@ import (
 // Token 是匹配的最小单位：一个汉字，或一个连续的字母/数字单词。
 type Token struct {
 	Text string // 原文（小写）
-	Py   string // 全拼（汉字）；单词则等于 Text
+	Py   string // 全拼（汉字，取第一个读音）；单词则等于 Text
 	NPy  string // 模糊音归一化后的拼音
 	Han  bool
+
+	Alts  []string // 所有读音（多音字，如 长: chang/zhang），Alts[0] == Py
+	NAlts []string // 所有读音的模糊音形式
 }
 
-var pyArgs = pinyin.NewArgs()
+var pyArgs = func() pinyin.Args { a := pinyin.NewArgs(); a.Heteronym = true; return a }()
+
+// GapCost 目标中间被跳过的字的代价（< 1：允许用户省略中间的词，如“罗技鼠标”→“罗技无线鼠标”）
+const gapCost = 0.4
 
 // usePinyin 汉字转拼音（同音字、模糊音、拼音输入、首字母）；--no-pinyin 关闭
 var usePinyin = true
@@ -109,7 +115,7 @@ func Tokenize(s string) []Token {
 	flush := func() {
 		if word.Len() > 0 {
 			w := word.String()
-			toks = append(toks, Token{Text: w, Py: w, NPy: w})
+			toks = append(toks, Token{Text: w, Py: w, NPy: w, Alts: []string{w}, NAlts: []string{w}})
 			word.Reset()
 		}
 	}
@@ -117,17 +123,21 @@ func Tokenize(s string) []Token {
 		switch {
 		case unicode.Is(unicode.Han, r):
 			flush()
-			py := string(r)
+			alts := []string{string(r)}
 			if usePinyin {
 				if p := pinyin.SinglePinyin(r, pyArgs); len(p) > 0 && p[0] != "" {
-					py = p[0]
+					alts = uniq(p)
 				}
 			}
-			npy := py
+			nalts := alts
 			if usePinyin {
-				npy = fuzzyPinyin(py)
+				nalts = make([]string, len(alts))
+				for i, a := range alts {
+					nalts[i] = fuzzyPinyin(a)
+				}
+				nalts = uniq(nalts)
 			}
-			toks = append(toks, Token{Text: string(r), Py: py, NPy: npy, Han: true})
+			toks = append(toks, Token{Text: string(r), Py: alts[0], NPy: nalts[0], Han: true, Alts: alts, NAlts: nalts})
 		case unicode.IsLetter(r) || unicode.IsDigit(r):
 			word.WriteRune(r)
 		default:
@@ -150,14 +160,72 @@ func joinPy(ts []Token, norm bool) string {
 	return b.String()
 }
 
-func initials(ts []Token) string {
-	var b strings.Builder
-	for _, t := range ts {
-		if t.Py != "" && t.Py[0] < 128 {
-			b.WriteByte(t.Py[0])
+func uniq(in []string) []string {
+	var out []string
+	for _, s := range in {
+		dup := false
+		for _, o := range out {
+			dup = dup || o == s
+		}
+		if !dup && s != "" {
+			out = append(out, s)
 		}
 	}
-	return b.String()
+	return out
+}
+
+func shareAny(a, b []string) bool {
+	for _, x := range a {
+		for _, y := range b {
+			if x == y {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// initialsMatch 查询 qs 是否为 t 的首字母（考虑多音字）：exact 完全匹配，prefix 为前缀。
+func initialsMatch(qs string, t []Token) (exact, prefix bool) {
+	if len(qs) > len(t) {
+		return false, false
+	}
+	for i := 0; i < len(qs); i++ {
+		ok := false
+		for _, a := range t[i].Alts {
+			ok = ok || (a != "" && a[0] == qs[i])
+		}
+		if !ok {
+			return false, false
+		}
+	}
+	return len(qs) == len(t), true
+}
+
+// pinyinSeg 尝试把拼音串 qp 切分为 t[i:] 连续若干个字的读音（考虑多音字），返回结束位置，失败返回 -1。
+// full=true 时要求恰好用完 t。
+func pinyinSeg(qp string, t []Token, i int, norm, full bool) int {
+	if qp == "" {
+		if full && i != len(t) {
+			return -1
+		}
+		return i
+	}
+	if i >= len(t) {
+		return -1
+	}
+	alts := t[i].Alts
+	if norm {
+		alts = t[i].NAlts
+	}
+	for _, a := range alts {
+		if a != "" && strings.HasPrefix(qp, a) {
+			if e := pinyinSeg(qp[len(a):], t, i+1, norm, full); e >= 0 {
+				return e
+			}
+		}
+	}
+	return -1
 }
 
 // subCost 两个 Token 的替换代价：0=完全相同 … 1=无关。
@@ -167,9 +235,9 @@ func subCost(a, b Token) float64 {
 	}
 	if a.Han && b.Han {
 		switch {
-		case a.Py == b.Py && a.Py != "":
-			return 0.15 // 同音字
-		case a.NPy == b.NPy && a.NPy != "":
+		case shareAny(a.Alts, b.Alts):
+			return 0.15 // 同音字（含多音字的任一读音）
+		case shareAny(a.NAlts, b.NAlts):
 			return 0.35 // 模糊音
 		}
 		return 1
@@ -210,7 +278,7 @@ func alignScore(q, t []Token) float64 {
 			if v := prev[j].c + 1; v < best.c { // q 多出的字
 				best = cell{v, prev[j].start}
 			}
-			if v := cur[j-1].c + 1; v < best.c { // t 中间缺失的字
+			if v := cur[j-1].c + gapCost; v < best.c { // t 中间被跳过的字
 				best = cell{v, cur[j-1].start}
 			}
 			cur[j] = best
@@ -250,9 +318,9 @@ func stringScore(q, t []Token) (float64, string) {
 		}
 	}
 	if isLatin && len(qs) >= 2 {
-		if in := initials(t); in == qs {
+		if exact, prefix := initialsMatch(qs, t); exact {
 			try(88, "initials")
-		} else if strings.HasPrefix(in, qs) && len(qs) >= 3 {
+		} else if prefix && len(qs) >= 3 {
 			try(80, "initials-prefix")
 		}
 	}
@@ -265,10 +333,17 @@ func stringScore(q, t []Token) (float64, string) {
 		if norm {
 			pen = 8
 		}
-		if qp == tp {
+		if qp == tp || pinyinSeg(qp, t, 0, norm, true) >= 0 {
 			try(95-pen, "pinyin")
 		} else if strings.Contains(tp, qp) && float64(len(qp)) >= 0.5*float64(len(tp)) {
 			try(85-pen, "pinyin-contains")
+		} else {
+			for i := range t { // 多音字：按字切分后的包含匹配
+				if e := pinyinSeg(qp, t, i, norm, false); e > i && 2*(e-i) >= len(t) {
+					try(85-pen, "pinyin-contains")
+					break
+				}
+			}
 		}
 		d := levenshtein.ComputeDistance(qp, tp)
 		r := 1 - float64(d)/float64(max(len(qp), len(tp)))
