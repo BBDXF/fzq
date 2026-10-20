@@ -138,3 +138,7 @@ src/            main.go input.go path.go engine.go text.go output.go
 examples/       contacts.yaml products.json app.jsonl cities.txt
 examples/songs/ songs.txt demo.sh test.sh cases.json
 ```
+
+## 许可 / License
+
+[MIT](LICENSE)。依赖库的许可见 / Third-party licenses: [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md)
