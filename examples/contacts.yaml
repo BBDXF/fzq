@@ -1,0 +1,16 @@
+# 通讯录 / contacts
+- name: 张三丰
+  dept: 研发部
+  phone: "13800000001"
+- name: 李思思
+  dept: 市场部
+  phone: "13800000002"
+- name: 王小明
+  dept: 研发部
+  tags: [前端, 实习]
+- name: 陈晓东
+  dept: 财务部
+  phone: "13800000004"
+- name: Linda Wang
+  dept: 市场部
+  phone: "13800000005"

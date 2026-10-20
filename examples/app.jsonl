@@ -1,0 +1,5 @@
+{"time":"10:01","level":"error","msg":"数据库连接超时"}
+{"time":"10:02","level":"info","msg":"用户登录成功"}
+{"time":"10:05","level":"error","msg":"磁盘空间不足"}
+{"time":"10:07","level":"warn","msg":"缓存命中率下降"}
+{"time":"10:09","level":"error","msg":"支付接口返回签名错误"}

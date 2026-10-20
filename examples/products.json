@@ -1,0 +1,11 @@
+{
+  "data": {
+    "items": [
+      {"id": 1, "name": "索尼降噪蓝牙耳机 WH-1000XM5", "price": 2499},
+      {"id": 2, "name": "苹果 AirPods Pro", "price": 1899},
+      {"id": 3, "name": "小米充电宝 20000mAh", "price": 129},
+      {"id": 4, "name": "罗技无线鼠标 MX Master 3S", "price": 699},
+      {"id": 5, "name": "华为智能手表 Watch GT 4", "price": 1488}
+    ]
+  }
+}
