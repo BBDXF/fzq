@@ -47,7 +47,7 @@ Output:
 Performance (large libraries):
       --prefilter-min N   use the inverted-index prefilter above N records (default 3000;
                           -1 = never, always score every record)
-      --candidates K      candidates kept by the prefilter (default 200)
+      --candidates K      candidates kept by the prefilter (default 500)
       --index-cache DIR   cache the built index in DIR, keyed by input content and index
                           options (not for stdin input)
 

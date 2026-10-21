@@ -14,7 +14,7 @@ import (
 // key 种类：s:音节（汉字的所有模糊读音）/ w:英文单词 / d:英文单词删一字 / g:拼音串的 3-gram / i:前 2~4 个字的首字母。
 
 const (
-	defaultCandidates = 200
+	defaultCandidates = 500
 	prefilterMinScore = 60 // 低于此最低分时召回无保证，退回全量扫描
 	indexBatch        = 4096
 )

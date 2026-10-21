@@ -30,7 +30,7 @@ type Engine struct {
 	MinScore float64
 
 	PrefilterMin int  // 记录数 > N 才用倒排预筛选；<0 关闭
-	Candidates   int  // 预筛选保留的候选数（默认 200）
+	Candidates   int  // 预筛选保留的候选数（默认 500）
 	WantPost     bool // 即使不预筛选也建倒排（写索引缓存需要）
 
 	records []*Record
