@@ -134,6 +134,26 @@ cd examples/songs
 fzq 不包含知识类映射（如"霉霉 = Taylor Swift"），需要时写进数据字段或在调用前替换查询。
 fzq has no knowledge mappings (e.g. nicknames); put them in data fields or rewrite the query beforehand.
 
+## 大数据量 / Large datasets
+
+记录数超过 `--prefilter-min`（默认 3000）时，fzq 先用倒排索引（音节、拼音三元组、首字母、英文词）挑出 `--candidates` 条候选（默认 500），只对候选精细打分；`--index-cache` 把索引存盘，下次启动直接读取，输入文件或索引相关选项（`-f -r -k -x --no-pinyin`）变化时自动重建。
+Above `--prefilter-min` records (default 3000), fzq picks `--candidates` (default 500) via an inverted index (syllables, pinyin trigrams, initials, words) and scores only those. `--index-cache` stores the index on disk and rebuilds it automatically when inputs or index options (`-f -r -k -x --no-pinyin`) change.
+
+```bash
+fzq --index-cache ~/.cache/fzq -x '...' -k title -k artist 晴天 songs.txt
+```
+
+3 万条合成曲库，单次调用 / 30k synthetic songs, one-shot (`examples/bench/bench.sh`):
+
+| | 耗时 / time | 内存 / max RSS |
+|---|---|---|
+| 全量扫描 / full scan | 1.73s | 166MB |
+| 粗筛 / prefilter | 0.43s | 107MB |
+| 粗筛 + 读缓存 / prefilter + cache hit | 0.10s | 55MB |
+
+粗筛与全量扫描在示例数据上结果一致；大数据量下，能部分匹配大量记录的短查询，靠后的低分结果可能不同，可调大 `--candidates` 或用 `--prefilter-min -1` 关闭。
+Results match a full scan on the examples; on large data, low-ranked results of short queries matching many records may differ — raise `--candidates` or disable with `--prefilter-min -1`.
+
 ## 结构 / Layout
 
 ```
