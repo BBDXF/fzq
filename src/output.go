@@ -81,7 +81,7 @@ func (p *Printer) Print(w io.Writer, q string, rs []Result) error {
 		for i, r := range rs {
 			var rec any = r.Rec.Raw
 			if r.Rec.IsJSON {
-				rec = r.Rec.data
+				rec = r.Rec.Data()
 			}
 			fields := map[string][]string{}
 			for k, v := range r.Rec.derived {

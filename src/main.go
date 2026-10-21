@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"slices"
 	"strings"
 	"text/template"
 
@@ -43,6 +44,13 @@ Output:
   -o, --output FMT      raw|text|json|jsonl (default raw: print matched records as-is)
   -t, --template TPL    Go template per result, e.g. '{{.score}}\t{{.record.title}}'
 
+Performance (large libraries):
+      --prefilter-min N   use the inverted-index prefilter above N records (default 3000;
+                          -1 = never, always score every record)
+      --candidates K      candidates kept by the prefilter (default 200)
+      --index-cache DIR   cache the built index in DIR, keyed by input content and index
+                          options (not for stdin input)
+
 Other:
   -c, --config FILE     load options from YAML (keys = long option names)
 
@@ -66,7 +74,12 @@ type Config struct {
 	Limit    int      `yaml:"limit"`
 	Output   string   `yaml:"output"`
 	Template string   `yaml:"template"`
-	Queries  string   `yaml:"-"`
+
+	PrefilterMin int    `yaml:"prefilter-min"`
+	Candidates   int    `yaml:"candidates"`
+	IndexCache   string `yaml:"index-cache"`
+
+	Queries string `yaml:"-"`
 }
 
 func main() { os.Exit(run(os.Args[1:])) }
@@ -77,7 +90,7 @@ func fail(format string, a ...any) int {
 }
 
 func run(args []string) int {
-	cfg := Config{MinScore: 65, Limit: 10, Output: "raw", Format: FmtAuto}
+	cfg := Config{MinScore: 65, Limit: 10, Output: "raw", Format: FmtAuto, PrefilterMin: 3000, Candidates: defaultCandidates}
 	var cli Config
 	var keys, strip listFlag
 	var cfgFile string
@@ -103,6 +116,9 @@ func run(args []string) int {
 	str(&cli.Template, "t", "template")
 	str(&cfgFile, "c", "config")
 	str(&cli.Queries, "queries")
+	fs.IntVar(&cli.PrefilterMin, "prefilter-min", 0, "")
+	fs.IntVar(&cli.Candidates, "candidates", 0, "")
+	str(&cli.IndexCache, "index-cache")
 
 	// 允许选项与位置参数交错（fzq '查询' file -n 3）
 	var pos []string
@@ -159,6 +175,15 @@ func run(args []string) int {
 	if pick("t", "template") {
 		cfg.Template = cli.Template
 	}
+	if pick("prefilter-min") {
+		cfg.PrefilterMin = cli.PrefilterMin
+	}
+	if pick("candidates") {
+		cfg.Candidates = cli.Candidates
+	}
+	if pick("index-cache") {
+		cfg.IndexCache = cli.IndexCache
+	}
 	cfg.Queries = cli.Queries
 
 	eng, err := buildEngine(&cfg)
@@ -186,15 +211,28 @@ func run(args []string) int {
 			return fail("%v", err)
 		}
 	}
-	var recs []*Record
-	for _, f := range pos {
-		r, err := ReadRecords(f, cfg.Format, rp)
-		if err != nil {
-			return fail("%v", err)
-		}
-		recs = append(recs, r...)
+	// 索引缓存：键取决于输入内容与索引选项；stdin 不缓存
+	ckey := ""
+	if cfg.IndexCache != "" && !slices.Contains(pos, "-") {
+		ckey, _ = cacheKey(&cfg, pos) // 读不到文件时 ckey 为空，由下面的 ReadRecords 报错
 	}
-	eng.Index(recs)
+	if ckey == "" || !eng.LoadCache(cfg.IndexCache, ckey) {
+		var recs []*Record
+		for _, f := range pos {
+			r, err := ReadRecords(f, cfg.Format, rp)
+			if err != nil {
+				return fail("%v", err)
+			}
+			recs = append(recs, r...)
+		}
+		eng.WantPost = ckey != ""
+		eng.Index(recs)
+		if ckey != "" {
+			if err := eng.SaveCache(cfg.IndexCache, ckey); err != nil {
+				fmt.Fprintf(os.Stderr, "fzq: index cache: %v\n", err)
+			}
+		}
+	}
 
 	p := &Printer{Format: cfg.Output}
 	if cfg.Template != "" {
@@ -233,7 +271,7 @@ func run(args []string) int {
 
 func buildEngine(cfg *Config) (*Engine, error) {
 	usePinyin = !cfg.NoPinyin
-	e := &Engine{MinScore: cfg.MinScore}
+	e := &Engine{MinScore: cfg.MinScore, PrefilterMin: cfg.PrefilterMin, Candidates: cfg.Candidates}
 	for _, k := range cfg.Key {
 		f, err := ParseFieldSpec(k)
 		if err != nil {

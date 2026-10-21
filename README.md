@@ -41,6 +41,9 @@ fzq [options] --queries Q.txt [FILE...]   每行一条查询，"-" 为 stdin / o
 | `-n, --limit N` | 最多结果数，默认 10，0 为全部 / max results, default 10, 0 = all |
 | `-o, --output` | `raw`（原样输出记录，默认 / records as-is, default）`text` `json` `jsonl` |
 | `-t, --template TPL` | Go 模板 / Go template: `.score .match .reason .record .fields .raw .line .source` |
+| `--prefilter-min N` | 记录数超过 N（默认 3000）时先用倒排索引挑出候选再打分，`-1` 关闭 / above N records (default 3000) pick candidates with an inverted index before scoring; `-1` disables |
+| `--candidates K` | 预筛选保留的候选数，默认 200 / candidates kept by the prefilter, default 200 |
+| `--index-cache DIR` | 把建好的索引缓存到 DIR，输入文件与索引相关选项不变时下次直接读取（stdin 不缓存）/ cache the built index in DIR and reuse it while input files and index-related options are unchanged (not for stdin) |
 | `-c, --config FILE` | 从 YAML 读取选项，键名同长选项 / load options from YAML |
 
 - 路径 / Paths：jq 子集 / jq subset — `.a.b`、`.a[]`、`.a[0]`、`."a b"`。
@@ -134,9 +137,10 @@ fzq has no knowledge mappings (e.g. nicknames); put them in data fields or rewri
 ## 结构 / Layout
 
 ```
-src/            main.go input.go path.go engine.go text.go output.go
+src/            main.go input.go path.go engine.go index.go cache.go text.go output.go
 examples/       contacts.yaml products.json app.jsonl cities.txt
 examples/songs/ songs.txt demo.sh test.sh cases.json
+examples/bench/ gen.go bench.sh   # 3 万条合成曲库的耗时/内存 / 30k-record benchmark
 ```
 
 ## 许可 / License

@@ -21,9 +21,22 @@ type Record struct {
 	Source string // 来源文件名（stdin 为 "-"）
 	Line   int    // 文本/JSONL 的行号；JSON/YAML 为记录序号（从 1 开始）
 
-	data    any                 // 解码后的值（文本行为 string）
+	data    any                 // 解码后的值（文本行为 string）；Index 之后释放，输出时由 Data() 按需还原
 	derived map[string][]string // --extract 生成的字段
-	toks    [][][]Token         // [字段][取值变体] → Token 序列
+	fvals   [][]string          // [字段] → 取值（Index 时算好，缓存也只存这个）
+	toks    [][][]Token         // [字段][取值变体] → Token 序列；惰性生成（见 Engine.tokens）
+}
+
+// Data 返回解码后的记录（模板的 .record）：JSON 记录由紧凑原文还原，文本行为原文。
+func (r *Record) Data() any {
+	if !r.IsJSON {
+		return r.Raw
+	}
+	dec := json.NewDecoder(strings.NewReader(r.Raw))
+	dec.UseNumber()
+	var v any
+	dec.Decode(&v)
+	return v
 }
 
 // Format 输入格式。

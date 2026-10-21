@@ -29,7 +29,13 @@ type Engine struct {
 	Strip    []*regexp.Regexp
 	MinScore float64
 
+	PrefilterMin int  // 记录数 > N 才用倒排预筛选；<0 关闭
+	Candidates   int  // 预筛选保留的候选数（默认 200）
+	WantPost     bool // 即使不预筛选也建倒排（写索引缓存需要）
+
 	records []*Record
+	nk4     []float32          // 每条记录 key 数的 1/4 次方（预筛选排序用）
+	post    map[string][]int32 // 倒排索引：key → 升序记录号
 }
 
 const minShortScore = 70 // ≤2 个 Token 的短查询的最低分
@@ -81,34 +87,57 @@ func (e *Engine) values(r *Record, f FieldSpec) []string {
 	return leafStrings(f.Path.Eval(r.data), nil)
 }
 
-// Index 预处理所有记录（派生字段、分词）。
-func (e *Engine) Index(recs []*Record) {
+// defaults 补全默认字段（整条记录）。
+func (e *Engine) defaults() {
 	if len(e.Fields) == 0 {
 		e.Fields = []FieldSpec{{Name: "."}}
 	}
-	for _, r := range recs {
-		r.derived = map[string][]string{}
-		if e.Extract != nil {
-			if m := e.Extract.FindStringSubmatch(r.Raw); m != nil {
-				for gi, n := range e.Extract.SubexpNames() {
-					if v := strings.TrimSpace(m[gi]); n != "" && v != "" {
-						r.derived[n] = append(r.derived[n], v)
-					}
-				}
-			}
-		}
-		r.toks = make([][][]Token, len(e.Fields))
-		for fi, f := range e.Fields {
-			for _, v := range e.values(r, f) {
-				for _, x := range variants(v) {
-					if t := Tokenize(x); len(t) > 0 {
-						r.toks[fi] = append(r.toks[fi], t)
-					}
+}
+
+// prepare 生成派生字段与各字段取值，之后不再需要解码后的 data。
+func (e *Engine) prepare(r *Record) {
+	r.derived = map[string][]string{}
+	if e.Extract != nil {
+		if m := e.Extract.FindStringSubmatch(r.Raw); m != nil {
+			for gi, n := range e.Extract.SubexpNames() {
+				if v := strings.TrimSpace(m[gi]); n != "" && v != "" {
+					r.derived[n] = append(r.derived[n], v)
 				}
 			}
 		}
 	}
-	e.records = recs
+	r.fvals = make([][]string, len(e.Fields))
+	for fi, f := range e.Fields {
+		r.fvals[fi] = e.values(r, f)
+	}
+	r.data = nil
+}
+
+// tokenize 把记录的各字段取值（及其变体）分词。
+func (e *Engine) tokenize(r *Record) [][][]Token {
+	toks := make([][][]Token, len(e.Fields))
+	for fi := range e.Fields {
+		for _, v := range r.fvals[fi] {
+			for _, x := range variants(v) {
+				if t := Tokenize(x); len(t) > 0 {
+					toks[fi] = append(toks[fi], t)
+				}
+			}
+		}
+	}
+	return toks
+}
+
+// tokens 取记录的 Token；keep=true 时保留（全量扫描），否则只在本次调用中使用（预筛选，省内存）。
+func (e *Engine) tokens(r *Record, keep bool) [][][]Token {
+	if r.toks != nil {
+		return r.toks
+	}
+	t := e.tokenize(r)
+	if keep {
+		r.toks = t
+	}
+	return t
 }
 
 // ---------------- 查询 ----------------
@@ -146,10 +175,10 @@ func fieldScore(q []Token, cands [][]Token) (float64, string) {
 	return best, why
 }
 
-func (e *Engine) scoreRecord(r *Record, q []Token) (float64, string, string) {
+func (e *Engine) scoreRecord(toks [][][]Token, q []Token) (float64, string, string) {
 	best, match, why := 0.0, "", ""
 	for fi, f := range e.Fields {
-		v, w := fieldScore(q, r.toks[fi])
+		v, w := fieldScore(q, toks[fi])
 		if v > best {
 			best, match, why = v, f.Name, w
 		}
@@ -164,7 +193,7 @@ func (e *Engine) scoreRecord(r *Record, q []Token) (float64, string, string) {
 			continue
 		}
 		for a, fa := range e.Fields {
-			sa, _ := fieldScore(left, r.toks[a])
+			sa, _ := fieldScore(left, toks[a])
 			if sa < 65 {
 				continue
 			}
@@ -172,7 +201,7 @@ func (e *Engine) scoreRecord(r *Record, q []Token) (float64, string, string) {
 				if a == b {
 					continue
 				}
-				sb, _ := fieldScore(right, r.toks[b])
+				sb, _ := fieldScore(right, toks[b])
 				if sb < 65 {
 					continue
 				}
@@ -187,8 +216,8 @@ func (e *Engine) scoreRecord(r *Record, q []Token) (float64, string, string) {
 	return best, match, why
 }
 
-// Search 返回得分最高的 limit 条（limit<=0 表示全部）。
-func (e *Engine) Search(query string, limit int) []Result {
+// parseQuery 查询 → 各变体的 Token 序列。
+func (e *Engine) parseQuery(query string) [][]Token {
 	var qs [][]Token
 	raw := strings.TrimSpace(strings.ToLower(query))
 	for i, v := range e.queryVariants(query) {
@@ -199,14 +228,30 @@ func (e *Engine) Search(query string, limit int) []Result {
 		}
 		qs = append(qs, t)
 	}
+	return qs
+}
+
+// Search 返回得分最高的 limit 条（limit<=0 表示全部）。
+func (e *Engine) Search(query string, limit int) []Result {
+	qs := e.parseQuery(query)
 	if len(qs) == 0 {
 		return nil
 	}
+	ids, pre := e.prefilter(qs) // pre=false：全量扫描
+	n := len(e.records)
+	if pre {
+		n = len(ids)
+	}
 	var results []Result
-	for _, r := range e.records {
+	for i := 0; i < n; i++ {
+		r := e.records[i]
+		if pre {
+			r = e.records[ids[i]]
+		}
+		toks := e.tokens(r, !pre)
 		best, match, why, qlen := 0.0, "", "", 0
 		for vi, q := range qs {
-			v, m, w := e.scoreRecord(r, q)
+			v, m, w := e.scoreRecord(toks, q)
 			if vi > 0 && len(qs) > 1 {
 				v -= 3 // 未剥离的原句略降权
 			}
